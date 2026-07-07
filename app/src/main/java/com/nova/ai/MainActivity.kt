@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("hi", "IN")
-                tts?.setPitch(0.7f)
+                tts?.setPitch(0.85f)
                 setMaleVoice()
             }
         }
