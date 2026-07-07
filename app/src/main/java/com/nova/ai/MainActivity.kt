@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
 
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
+                tts?.language = Locale("hi", "IN")
                 setMaleVoice()
             }
         }
@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(onClick = {
-                        speak("Hello, I am NOVA AI. How can I help you today?")
+                        speak("नमस्ते, मैं नोवा एआई हूं। मैं आपकी कैसे मदद कर सकता हूं?")
                     }) {
                         Text("Speak")
                     }
