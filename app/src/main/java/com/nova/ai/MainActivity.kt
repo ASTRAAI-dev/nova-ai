@@ -1,8 +1,10 @@
 package com.nova.ai
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.MediaStore
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -18,7 +20,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.util.Locale
 
@@ -29,11 +30,7 @@ class MainActivity : ComponentActivity() {
 
     private val requestMicPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (!granted) {
-            // Permission denied - user ko baad me phir se try karna hoga
-        }
-    }
+    ) { granted -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,7 +64,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(onClick = {
-                        speak("नमस्ते, मैं नोवा एआई हूं। मैं आपकी कैसे मदद कर सकता हूं?")
+                        speak("नमस्ते, मैं नोवा एआई हूं।")
                     }) {
                         Text("Speak")
                     }
@@ -87,6 +84,7 @@ class MainActivity : ComponentActivity() {
                                 onResult = { text ->
                                     recognizedText = text
                                     isListening = false
+                                    handleCommand(text)
                                 },
                                 onError = {
                                     recognizedText = "Samajh nahi aaya, phir try karo"
@@ -106,8 +104,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handleCommand(command: String) {
+        val lowerCommand = command.lowercase()
+
+        when {
+            lowerCommand.contains("camera") || lowerCommand.contains("कैमरा") -> {
+                speak("कैमरा खोल रहा हूं")
+                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                }
+            }
+            else -> {
+                speak("माफ कीजिए, मुझे यह समझ नहीं आया")
+            }
+        }
+    }
+
     private fun startListening(onResult: (String) -> Unit, onError: () -> Unit) {
-        val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
         }
