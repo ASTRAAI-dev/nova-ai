@@ -2,10 +2,11 @@ package com.nova.ai
 
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
-import android.speech.tts.Voice
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,18 +26,18 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("hi", "IN")
-                tts?.setPitch(0.85f)
-                setMaleVoice()
             }
         }
 
         setContent {
             Surface(modifier = Modifier.fillMaxSize()) {
+                var voiceList by remember { mutableStateOf("") }
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.Center
+                        .padding(24.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
                     Text(
                         text = "Hello, I am NOVA AI 🤖",
@@ -50,18 +51,30 @@ class MainActivity : ComponentActivity() {
                     }) {
                         Text("Speak")
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(onClick = {
+                        val voices = tts?.voices?.filter { it.locale.language == "hi" }
+                        voiceList = voices?.joinToString("\n") { v ->
+                            "${v.name} | quality=${v.quality} | gender_hint=${
+                                when {
+                                    v.name.contains("male", true) -> "male"
+                                    v.name.contains("female", true) -> "female"
+                                    else -> "unknown"
+                                }
+                            }"
+                        } ?: "No Hindi voices found"
+                    }) {
+                        Text("List Hindi Voices")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(text = voiceList, fontSize = 12.sp)
                 }
             }
         }
-    }
-
-    private fun setMaleVoice() {
-        val voices: Set<Voice>? = tts?.voices
-        val maleVoice = voices?.firstOrNull {
-            it.name.contains("male", ignoreCase = true) &&
-            !it.name.contains("female", ignoreCase = true)
-        }
-        maleVoice?.let { tts?.voice = it }
     }
 
     private fun speak(text: String) {
