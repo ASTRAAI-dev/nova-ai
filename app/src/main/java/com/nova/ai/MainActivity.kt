@@ -19,6 +19,8 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
 
     private var tts: TextToSpeech? = null
+    private var hindiVoices: List<android.speech.tts.Voice> = listOf()
+    private var currentIndex = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,13 +28,13 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("hi", "IN")
-                tts?.setPitch(0.9f)
+                hindiVoices = tts?.voices?.filter { it.locale.language == "hi" }?.toList() ?: listOf()
             }
         }
 
         setContent {
             Surface(modifier = Modifier.fillMaxSize()) {
-                var voiceList by remember { mutableStateOf("") }
+                var currentVoiceName by remember { mutableStateOf("Koi voice test nahi hui abhi") }
 
                 Column(
                     modifier = Modifier
@@ -48,31 +50,28 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(onClick = {
-                        speak("नमस्ते, मैं नोवा एआई हूं। मैं आपकी कैसे मदद कर सकता हूं?")
+                        speak("नमस्ते, मैं नोवा एआई हूं।")
                     }) {
-                        Text("Speak")
+                        Text("Speak (Default)")
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(onClick = {
-                        val voices = tts?.voices?.filter { it.locale.language == "hi" }
-                        voiceList = voices?.joinToString("\n") { v ->
-                            "${v.name} | quality=${v.quality} | gender_hint=${
-                                when {
-                                    v.name.contains("male", true) -> "male"
-                                    v.name.contains("female", true) -> "female"
-                                    else -> "unknown"
-                                }
-                            }"
-                        } ?: "No Hindi voices found"
+                        if (hindiVoices.isNotEmpty()) {
+                            val voice = hindiVoices[currentIndex]
+                            tts?.voice = voice
+                            speak("नमस्ते, यह आवाज़ है ${voice.name}")
+                            currentVoiceName = "Testing: ${voice.name} (${currentIndex + 1}/${hindiVoices.size})"
+                            currentIndex = (currentIndex + 1) % hindiVoices.size
+                        }
                     }) {
-                        Text("List Hindi Voices")
+                        Text("Test Next Voice")
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Text(text = voiceList, fontSize = 12.sp)
+                    Text(text = currentVoiceName, fontSize = 14.sp)
                 }
             }
         }
