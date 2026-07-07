@@ -5,8 +5,6 @@ import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -19,8 +17,6 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
 
     private var tts: TextToSpeech? = null
-    private var hindiVoices: List<android.speech.tts.Voice> = listOf()
-    private var currentIndex = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,19 +24,19 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("hi", "IN")
-                hindiVoices = tts?.voices?.filter { it.locale.language == "hi" }?.toList() ?: listOf()
+
+                val selectedVoice = tts?.voices?.firstOrNull { it.name == "hi-in-x-hie-network" }
+                selectedVoice?.let { tts?.voice = it }
             }
         }
 
         setContent {
             Surface(modifier = Modifier.fillMaxSize()) {
-                var currentVoiceName by remember { mutableStateOf("Koi voice test nahi hui abhi") }
-
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp)
-                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.Center
                 ) {
                     Text(
                         text = "Hello, I am NOVA AI 🤖",
@@ -50,28 +46,10 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(onClick = {
-                        speak("नमस्ते, मैं नोवा एआई हूं।")
+                        speak("नमस्ते, मैं नोवा एआई हूं। मैं आपकी कैसे मदद कर सकता हूं?")
                     }) {
-                        Text("Speak (Default)")
+                        Text("Speak")
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Button(onClick = {
-                        if (hindiVoices.isNotEmpty()) {
-                            val voice = hindiVoices[currentIndex]
-                            tts?.voice = voice
-                            speak("नमस्ते, यह आवाज़ है ${voice.name}")
-                            currentVoiceName = "Testing: ${voice.name} (${currentIndex + 1}/${hindiVoices.size})"
-                            currentIndex = (currentIndex + 1) % hindiVoices.size
-                        }
-                    }) {
-                        Text("Test Next Voice")
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(text = currentVoiceName, fontSize = 14.sp)
                 }
             }
         }
