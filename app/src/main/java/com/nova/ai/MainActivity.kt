@@ -32,10 +32,7 @@ class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
 
-    // Multi-step conversation (jaise alarm time poochna)
     private var pendingAction: String? = null
-
-    // ===== NAYA: Undo/Cancel System =====
     private var lastAction: String? = null
     private var lastAlarmTime: String? = null
 
@@ -145,6 +142,26 @@ class MainActivity : ComponentActivity() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    Button(onClick = {
+                        if (Settings.canDrawOverlays(this@MainActivity)) {
+                            startService(Intent(this@MainActivity, FloatingService::class.java))
+                        } else {
+                            recognizedText = "Pehle overlay permission on karo"
+                        }
+                    }) {
+                        Text("Start Bubble")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(onClick = {
+                        stopService(Intent(this@MainActivity, FloatingService::class.java))
+                    }) {
+                        Text("Stop Bubble")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Text(text = recognizedText, fontSize = 16.sp)
                 }
             }
@@ -156,14 +173,12 @@ class MainActivity : ComponentActivity() {
     private fun handleCommand(command: String) {
         val lower = command.trim().lowercase()
 
-        // --- Priority 1: Agar pehle se koi sawal poocha tha (jaise alarm time) ---
         if (pendingAction == "alarm_time") {
             pendingAction = null
             setAlarmFromText(lower)
             return
         }
 
-        // --- Priority 2: CANCEL / UNDO COMMAND ---
         val isCancelCommand = lower.contains("cancel") || lower.contains("रद्द") ||
                 lower.contains("undo") || lower.contains("वापस") ||
                 lower.contains("band karo") || lower.contains("बंद करो") ||
@@ -190,7 +205,6 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // --- Alarm: agar time nahi bola, toh poochna hai ---
         if ((lower.contains("alarm") || lower.contains("अलार्म")) && !Regex("\\d").containsMatchIn(lower)) {
             speak("कितने बजे का अलार्म लगाना है?")
             pendingAction = "alarm_time"
@@ -201,61 +215,51 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // --- Call ---
         Regex("(.+?)\\s+(?:ko|को)\\s+(?:call|कॉल)\\s+(?:karo|करो)").find(lower)?.let {
             makeCall(it.groupValues[1].trim())
             return
         }
 
-        // --- WhatsApp ---
         Regex("(.+?)\\s+(?:ko|को)\\s+(?:whatsapp|व्हाट्सएप)\\s+(?:par|पर|pe)?\\s*(?:message|मैसेज)?\\s*(?:karo|करो|bhejo|भेजो)\\s+(.+)").find(lower)?.let {
             sendWhatsAppMessage(it.groupValues[1].trim(), it.groupValues[2].trim())
             return
         }
 
-        // --- Email ---
         Regex("(.+?)\\s+(?:ko|को)\\s+email\\s+(?:bhejo|भेजो)\\s+subject\\s+(.+?)\\s+body\\s+(.+)").find(lower)?.let {
             sendEmail(it.groupValues[1].trim(), it.groupValues[2].trim(), it.groupValues[3].trim())
             return
         }
 
-        // --- Maps ---
         Regex("(.+?)\\s+(?:ka|की|के)?\\s*(?:rasta|रास्ता)\\s+(?:dikhao|दिखाओ)").find(lower)?.let {
             showRoute(it.groupValues[1].trim())
             return
         }
 
-        // --- YouTube search ---
         Regex("youtube\\s+(?:par|पर)\\s+(.+?)\\s+(?:dhundo|ढूंढो|search karo)").find(lower)?.let {
             searchYouTube(it.groupValues[1].trim())
             return
         }
 
-        // --- Web search ---
         Regex("(?:chrome|google|गूगल)\\s+(?:par|पर)\\s+(.+?)\\s+(?:search karo|dhundo|ढूंढो|खोजो)").find(lower)?.let {
             searchWeb(it.groupValues[1].trim())
             return
         }
 
-        // --- Instagram profile ---
         Regex("instagram\\s+(?:par|पर)\\s+(.+?)\\s+(?:dhundo|ढूंढो)").find(lower)?.let {
             openInstagramProfile(it.groupValues[1].trim())
             return
         }
 
-        // --- Facebook search ---
         Regex("facebook\\s+(?:par|पर)\\s+(.+?)\\s+(?:search karo|dhundo)").find(lower)?.let {
             searchFacebook(it.groupValues[1].trim())
             return
         }
 
-        // --- Notes ---
         Regex("note\\s+(?:me|में)\\s+(?:likho|लिखो)\\s+(.+)").find(lower)?.let {
             createNote(it.groupValues[1].trim())
             return
         }
 
-        // --- Camera: photo / video ---
         if (lower.contains("photo") || lower.contains("फोटो")) {
             speak("फोटो के लिए कैमरा खोल रहा हूं")
             startActivity(Intent(MediaStore.ACTION_IMAGE_CAPTURE))
@@ -269,7 +273,6 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // --- Universal simple apps ---
         when {
             lower.contains("phone") || lower.contains("dialer") || lower.contains("फोन") -> {
                 speak("फोन खोल रहा हूं")
@@ -303,7 +306,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // --- Baaki apps: package list se ---
         for ((keywords, pkg) in appMap) {
             if (keywords.any { lower.contains(it) }) {
                 openApp(pkg, keywords.first())
@@ -491,19 +493,30 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onResults(results: Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                onResult(matches?.firstOrNull() ?: "Kuch samajh nahi aaya")
-            }
-            override fun onError(error: Int) { onError() }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
+
+            override fun onError(error: Int) {
+                onError()
+            }
+
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull()
+                if (text != null) {
+                    onResult(text)
+                } else {
+                    onError()
+                }
+            }
+
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -516,9 +529,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        super.onDestroy()
         tts?.stop()
         tts?.shutdown()
         speechRecognizer?.destroy()
-        super.onDestroy()
     }
 }
