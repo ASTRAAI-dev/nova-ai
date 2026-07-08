@@ -3,8 +3,12 @@ package com.nova.ai
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.AlarmClock
+import android.provider.ContactsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -28,9 +32,35 @@ class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
 
+    // Multi-step conversation ke liye (jaise alarm time poochna)
+    private var pendingAction: String? = null
+
     private val requestMicPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted -> }
+    ) { }
+
+    private val requestExtraPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
+
+    // App khud khulne wale apps: keywords -> package name
+    private val appMap = listOf(
+        listOf("gmail", "जीमेल") to "com.google.android.gm",
+        listOf("google drive", "drive", "ड्राइव") to "com.google.android.apps.docs",
+        listOf("google docs", "docs", "डॉक्स") to "com.google.android.apps.docs.editors.docs",
+        listOf("whatsapp", "व्हाट्सएप") to "com.whatsapp",
+        listOf("instagram", "इंस्टाग्राम") to "com.instagram.android",
+        listOf("facebook", "फेसबुक") to "com.facebook.katana",
+        listOf("chatgpt", "चैटजीपीटी") to "com.openai.chatgpt",
+        listOf("gemini", "जेमिनी") to "com.google.android.apps.bard",
+        listOf("claude", "क्लॉड") to "com.anthropic.claude",
+        listOf("photos", "फोटोज़") to "com.google.android.apps.photos",
+        listOf("notes", "नोट्स") to "com.google.android.keep",
+        listOf("chrome", "क्रोम") to "com.android.chrome",
+        listOf("youtube", "यूट्यूब") to "com.google.android.youtube",
+        listOf("maps", "मैप्स") to "com.google.android.apps.maps",
+        listOf("google", "गूगल") to "com.google.android.googlequicksearchbox"
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,44 +86,60 @@ class MainActivity : ComponentActivity() {
                         .padding(24.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "Hello, I am NOVA AI 🤖",
-                        fontSize = 22.sp
-                    )
+                    Text(text = "Hello, I am NOVA AI 🤖", fontSize = 22.sp)
 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(onClick = {
-                        speak("नमस्ते, मैं नोवा एआई हूं।")
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        val hasContacts = ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.READ_CONTACTS
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        val hasCall = ContextCompat.checkSelfPermission(
+                            this@MainActivity, Manifest.permission.CALL_PHONE
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        when {
+                            !hasMic -> requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            !hasContacts || !hasCall -> requestExtraPermissions.launch(
+                                arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE)
+                            )
+                            else -> {
+                                isListening = true
+                                startListening(
+                                    onResult = { text ->
+                                        recognizedText = text
+                                        isListening = false
+                                        handleCommand(text)
+                                    },
+                                    onError = {
+                                        recognizedText = "Samajh nahi aaya, phir try karo"
+                                        isListening = false
+                                    }
+                                )
+                            }
+                        }
                     }) {
-                        Text("Speak")
+                        Text(if (isListening) "Sun raha hoon..." else "Listen")
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(onClick = {
-                        val hasPermission = ContextCompat.checkSelfPermission(
-                            this@MainActivity, Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-
-                        if (!hasPermission) {
-                            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
-                        } else {
-                            isListening = true
-                            startListening(
-                                onResult = { text ->
-                                    recognizedText = text
-                                    isListening = false
-                                    handleCommand(text)
-                                },
-                                onError = {
-                                    recognizedText = "Samajh nahi aaya, phir try karo"
-                                    isListening = false
-                                }
+                        if (!Settings.canDrawOverlays(this@MainActivity)) {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:$packageName")
+                                )
                             )
                         }
                     }) {
-                        Text(if (isListening) "Sun raha hoon..." else "Listen")
+                        Text("Enable Floating Button")
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -104,22 +150,287 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun handleCommand(command: String) {
-        val lowerCommand = command.lowercase()
+    // ================= MAIN COMMAND HANDLER =================
 
+    private fun handleCommand(command: String) {
+        val lower = command.trim().lowercase()
+
+        // --- Agar pehle se koi question poocha tha (jaise alarm time) ---
+        if (pendingAction == "alarm_time") {
+            pendingAction = null
+            setAlarmFromText(lower)
+            return
+        }
+
+        // --- Alarm: agar time nahi bola, toh poochna hai ---
+        if ((lower.contains("alarm") || lower.contains("अलार्म")) && !Regex("\\d").containsMatchIn(lower)) {
+            speak("कितने बजे का अलार्म लगाना है?")
+            pendingAction = "alarm_time"
+            return
+        }
+        if (lower.contains("alarm") || lower.contains("अलार्म")) {
+            setAlarmFromText(lower)
+            return
+        }
+
+        // --- Call: "X ko call karo" ---
+        Regex("(.+?)\\s+(?:ko|को)\\s+(?:call|कॉल)\\s+(?:karo|करो)").find(lower)?.let {
+            makeCall(it.groupValues[1].trim())
+            return
+        }
+
+        // --- WhatsApp: "X ko whatsapp par 'msg' bhejo/karo" ---
+        Regex("(.+?)\\s+(?:ko|को)\\s+(?:whatsapp|व्हाट्सएप)\\s+(?:par|पर|pe)?\\s*(?:message|मैसेज)?\\s*(?:karo|करो|bhejo|भेजो)\\s+(.+)").find(lower)?.let {
+            sendWhatsAppMessage(it.groupValues[1].trim(), it.groupValues[2].trim())
+            return
+        }
+
+        // --- Email: "X ko email bhejo subject Y body Z" ---
+        Regex("(.+?)\\s+(?:ko|को)\\s+email\\s+(?:bhejo|भेजो)\\s+subject\\s+(.+?)\\s+body\\s+(.+)").find(lower)?.let {
+            sendEmail(it.groupValues[1].trim(), it.groupValues[2].trim(), it.groupValues[3].trim())
+            return
+        }
+
+        // --- Maps: "X ka rasta dikhao" ---
+        Regex("(.+?)\\s+(?:ka|की|के)?\\s*(?:rasta|रास्ता)\\s+(?:dikhao|दिखाओ)").find(lower)?.let {
+            showRoute(it.groupValues[1].trim())
+            return
+        }
+
+        // --- YouTube search: "youtube par X dhundo" ---
+        Regex("youtube\\s+(?:par|पर)\\s+(.+?)\\s+(?:dhundo|ढूंढो|search karo)").find(lower)?.let {
+            searchYouTube(it.groupValues[1].trim())
+            return
+        }
+
+        // --- Chrome/Google search: "chrome par X search karo" ---
+        Regex("(?:chrome|google|गूगल)\\s+(?:par|पर)\\s+(.+?)\\s+(?:search karo|dhundo|ढूंढो|खोजो)").find(lower)?.let {
+            searchWeb(it.groupValues[1].trim())
+            return
+        }
+
+        // --- Instagram profile: "instagram par X dhundo" ---
+        Regex("instagram\\s+(?:par|पर)\\s+(.+?)\\s+(?:dhundo|ढूंढो)").find(lower)?.let {
+            openInstagramProfile(it.groupValues[1].trim())
+            return
+        }
+
+        // --- Facebook search: "facebook par X search karo" ---
+        Regex("facebook\\s+(?:par|पर)\\s+(.+?)\\s+(?:search karo|dhundo)").find(lower)?.let {
+            searchFacebook(it.groupValues[1].trim())
+            return
+        }
+
+        // --- Notes: "note me likho X" ---
+        Regex("note\\s+(?:me|में)\\s+(?:likho|लिखो)\\s+(.+)").find(lower)?.let {
+            createNote(it.groupValues[1].trim())
+            return
+        }
+
+        // --- Camera: photo / video ---
+        if (lower.contains("photo") || lower.contains("फोटो")) {
+            speak("फोटो के लिए कैमरा खोल रहा हूं")
+            startActivity(Intent(MediaStore.ACTION_IMAGE_CAPTURE))
+            return
+        }
+        if (lower.contains("video") || lower.contains("वीडियो")) {
+            speak("वीडियो के लिए कैमरा खोल रहा हूं")
+            startActivity(Intent(MediaStore.ACTION_VIDEO_CAPTURE))
+            return
+        }
+
+        // --- Universal simple apps ---
         when {
-            lowerCommand.contains("camera") || lowerCommand.contains("कैमरा") -> {
-                speak("कैमरा खोल रहा हूं")
-                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                if (intent.resolveActivity(packageManager) != null) {
-                    startActivity(intent)
-                }
+            lower.contains("phone") || lower.contains("dialer") || lower.contains("फोन") -> {
+                speak("फोन खोल रहा हूं"); startActivity(Intent(Intent.ACTION_DIAL)); return
             }
-            else -> {
-                speak("माफ कीजिए, मुझे यह समझ नहीं आया")
+            lower.contains("contact") || lower.contains("कॉन्टैक्ट") -> {
+                speak("कॉन्टैक्ट्स खोल रहा हूं")
+                startActivity(Intent(Intent.ACTION_VIEW, ContactsContract.Contacts.CONTENT_URI)); return
+            }
+            lower.contains("message") || lower.contains("मैसेज") || lower.contains("sms") -> {
+                speak("मैसेज खोल रहा हूं")
+                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MESSAGING)); return
+            }
+            lower.contains("camera") || lower.contains("कैमरा") -> {
+                speak("कैमरा खोल रहा हूं")
+                startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); return
+            }
+            lower.contains("gallery") || lower.contains("गैलरी") -> {
+                speak("गैलरी खोल रहा हूं")
+                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)); return
+            }
+            lower.contains("clock") || lower.contains("घड़ी") -> {
+                speak("क्लॉक खोल रहा हूं")
+                startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS)); return
             }
         }
+
+        // --- Baaki apps: package list se ---
+        for ((keywords, pkg) in appMap) {
+            if (keywords.any { lower.contains(it) }) {
+                openApp(pkg, keywords.first())
+                return
+            }
+        }
+
+        speak("माफ कीजिए, मुझे यह समझ नहीं आया")
     }
+
+    // ================= HELPER FUNCTIONS =================
+
+    private fun openApp(packageName: String, label: String) {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent != null) {
+            speak("$label खोल रहा हूं")
+            startActivity(launchIntent)
+        } else {
+            speak("यह ऐप installed नहीं है")
+        }
+    }
+
+    private fun findContactNumber(name: String): String? {
+        val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        )
+        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                val contactName = cursor.getString(nameIdx) ?: continue
+                if (contactName.contains(name, ignoreCase = true)) {
+                    return cursor.getString(numberIdx)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findContactEmail(name: String): String? {
+        val uri = ContactsContract.CommonDataKinds.Email.CONTENT_URI
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Email.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Email.ADDRESS
+        )
+        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.DISPLAY_NAME)
+            val emailIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS)
+            while (cursor.moveToNext()) {
+                val contactName = cursor.getString(nameIdx) ?: continue
+                if (contactName.contains(name, ignoreCase = true)) {
+                    return cursor.getString(emailIdx)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun makeCall(name: String) {
+        val number = findContactNumber(name)
+        if (number != null) {
+            speak("$name को कॉल कर रहा हूं")
+            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")))
+        } else {
+            speak("मुझे $name नाम का contact नहीं मिला")
+        }
+    }
+
+    private fun sendWhatsAppMessage(name: String, message: String) {
+        val number = findContactNumber(name)
+        if (number != null) {
+            var cleanNumber = number.replace(Regex("[^0-9+]"), "")
+            if (!cleanNumber.startsWith("+")) cleanNumber = "+91$cleanNumber"
+            speak("$name के लिए WhatsApp खोल रहा हूं")
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("https://wa.me/$cleanNumber?text=${Uri.encode(message)}")
+            })
+        } else {
+            speak("मुझे $name नाम का contact नहीं मिला")
+        }
+    }
+
+    private fun sendEmail(name: String, subject: String, body: String) {
+        val email = findContactEmail(name)
+        speak("Email तैयार कर रहा हूं")
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:")
+            if (email != null) putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+        }
+        if (intent.resolveActivity(packageManager) != null) startActivity(intent)
+    }
+
+    private fun showRoute(location: String) {
+        speak("$location का रास्ता दिखा रहा हूं")
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("google.navigation:q=${Uri.encode(location)}")
+        )
+        intent.setPackage("com.google.android.apps.maps")
+        if (intent.resolveActivity(packageManager) != null) startActivity(intent)
+    }
+
+    private fun searchYouTube(query: String) {
+        speak("YouTube पर $query ढूंढ रहा हूं")
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}")))
+    }
+
+    private fun searchWeb(query: String) {
+        speak("$query सर्च कर रहा हूं")
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")))
+    }
+
+    private fun openInstagramProfile(username: String) {
+        speak("Instagram पर $username खोल रहा हूं")
+        val clean = username.replace(" ", "")
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com/$clean")))
+    }
+
+    private fun searchFacebook(query: String) {
+        speak("Facebook पर $query सर्च कर रहा हूं")
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.facebook.com/search/top/?q=${Uri.encode(query)}")))
+    }
+
+    private fun createNote(text: String) {
+        speak("Note बना रहा हूं")
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            setPackage("com.google.android.keep")
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        } else {
+            speak("Notes ऐप नहीं मिला")
+        }
+    }
+
+    private fun setAlarmFromText(text: String) {
+        val hourMatch = Regex("(\\d{1,2})(?::(\\d{2}))?").find(text)
+        if (hourMatch == null) {
+            speak("मुझे समय समझ नहीं आया")
+            return
+        }
+        var hour = hourMatch.groupValues[1].toInt()
+        val minute = hourMatch.groupValues[2].ifEmpty { "0" }.toInt()
+
+        if ((text.contains("shaam") || text.contains("शाम") || text.contains("raat") || text.contains("रात")) && hour < 12) {
+            hour += 12
+        }
+
+        speak("ठीक है, $hour बजकर $minute मिनट का अलार्म लगा दिया")
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+            putExtra(AlarmClock.EXTRA_HOUR, hour)
+            putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        }
+        if (intent.resolveActivity(packageManager) != null) startActivity(intent)
+    }
+
+    // ================= SPEECH ENGINE =================
 
     private fun startListening(onResult: (String) -> Unit, onError: () -> Unit) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -132,11 +443,7 @@ class MainActivity : ComponentActivity() {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 onResult(matches?.firstOrNull() ?: "Kuch samajh nahi aaya")
             }
-
-            override fun onError(error: Int) {
-                onError()
-            }
-
+            override fun onError(error: Int) { onError() }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
